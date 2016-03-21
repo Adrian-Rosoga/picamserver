@@ -25,7 +25,7 @@ ImageMgr::~ImageMgr()
 }
 
 void ImageMgr::takeImageThreadLoop_(const std::string& takeImageCmd)
-{
+{ 
     while (1)
     {   
         {
@@ -42,7 +42,7 @@ void ImageMgr::takeImageThreadLoop_(const std::string& takeImageCmd)
                   
                   images_[index].size = nbBytes;
                 
-                  log(std::this_thread::get_id(), " Photo thread - size = ", nbBytes, ", index = ", index);
+                  log(std::this_thread::get_id(), " Photo thread: size=", nbBytes, ", windex=", index);
               };
             
             produce(take_picture);
