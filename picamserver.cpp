@@ -1,6 +1,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/sendfile.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -121,6 +123,7 @@ int process(int fd, std::reference_wrapper<ImageMgr> imageMgrW)
     
     if (strstr(request, "GET / HTTP"))
     {
+        // Root page
         std::string page(HTTP_PAGE_MAIN);
         
         std::ostringstream str;
@@ -135,6 +138,7 @@ int process(int fd, std::reference_wrapper<ImageMgr> imageMgrW)
     }
     else if (strstr(request, "GET /picamimage HTTP"))
     {
+        // Image
         struct iovec iov[3];
 
         iov[0].iov_base = (void*)HTTP_HEADER_200_OK.c_str();
@@ -145,7 +149,7 @@ int process(int fd, std::reference_wrapper<ImageMgr> imageMgrW)
         
         std::function<void(int)> callback = [&](int index) {
                     
-            str << "Content-lenght: " << imageMgr[index].size << "\r\n\r\n";
+            str << "Content-Lenght: " << imageMgr[index].size << "\r\n\r\n";
             
             iov[1].iov_base = (void *)str.str().c_str();
             iov[1].iov_len = str.str().size();
@@ -163,15 +167,22 @@ int process(int fd, std::reference_wrapper<ImageMgr> imageMgrW)
     }
     else if (strstr(request, "GET /favicon.ico HTTP"))
     {
+        // favicon
+        int optval = 1;
+        if (setsockopt(fd, IPPROTO_TCP, TCP_CORK, &optval, sizeof(int)) < 0)
+        {
+            perror("setsockopt(TCP_CORK on) failed");
+        }
+        
         auto n = write(fd, HTTP_HEADER_200_OK.c_str(), HTTP_HEADER_200_OK.size());
         CHECK_WRITE_SOCKET(n);
         
         std::ostringstream str;
-        auto fav_fd = open("favicon.ico", O_RDONLY);
-        if (fav_fd == -1)
+        auto file_fd = open("favicon.ico", O_RDONLY);
+        if (file_fd == -1)
         {
             std::cerr << "Cannot open favicon.ico" << std::endl;
-            str << "Content-lenght: " << 0 << "\r\n\r\n";
+            str << "Content-Lenght: " << 0 << "\r\n\r\n";
             
             auto n = write(fd, str.str().c_str(), str.str().size());
             CHECK_WRITE_SOCKET(n);
@@ -179,28 +190,59 @@ int process(int fd, std::reference_wrapper<ImageMgr> imageMgrW)
         }
         
         struct stat buf;
-        fstat(fav_fd, &buf);
+        fstat(file_fd, &buf);
      
         str << "Content-Type: image/ico" << "\r\n"; 
-        str << "Content-lenght: " << buf.st_size << "\r\n\r\n";           
+        str << "Content-Lenght: " << buf.st_size << "\r\n\r\n";           
         n = write(fd, str.str().c_str(), str.str().size());
         CHECK_WRITE_SOCKET(n);
         
-        n = sendfile(fd, fav_fd, NULL, 0);
+        n = sendfile(fd, file_fd, NULL, 0);
+        CHECK_WRITE_SOCKET(n);
+        
+        close(file_fd);
+        
+        optval = 0;
+        if (setsockopt(fd, IPPROTO_TCP, TCP_CORK, &optval, sizeof(int)) < 0)
+        {
+            perror("setsockopt(TCP_CORK off) failed");
+        }
+    }
+    else if (strstr(request, "GET /test HTTP"))
+    {
+        // Testing
+        struct iovec iov[3];
+
+        iov[0].iov_base = (void*)HTTP_HEADER_200_OK.c_str();
+        iov[0].iov_len = HTTP_HEADER_200_OK.size();
+        
+        std::ostringstream str;        
+        str << "Content-Type: text/plain" << "\r\n"
+            << "Content-Lenght: 512\r\n\r\n";
+            
+        iov[1].iov_base = (void *)str.str().c_str();
+        iov[1].iov_len = str.str().size();
+        
+        char data[512];
+        
+        iov[2].iov_base = data;
+        iov[2].iov_len = 512;
+        
+        auto n = writev(fd, iov, 3);
         CHECK_WRITE_SOCKET(n);
     }
     else
     {
-        // Bail out  
+        // Unsupported request
+        std::cout << "Error: Unsupported request: '" << request << "'" << std::endl;
+        
         std::ostringstream str;
         str << HTTP_HEADER_404_NOT_FOUND << "\r\n";
-        str << "Content-lenght: " << HTTP_BODY_404_NOT_FOUND.size() << "\r\n\r\n";
+        str << "Content-Lenght: " << HTTP_BODY_404_NOT_FOUND.size() << "\r\n\r\n";
         str << HTTP_BODY_404_NOT_FOUND;
         
         auto n = write(fd, str.str().c_str(), str.str().size());
         CHECK_WRITE_SOCKET(n);
-        
-        std::cout << "Error: Unknown request: '" << request << "'" << std::endl;
     }
     
     close(fd);
@@ -223,11 +265,15 @@ int main(int argc, char** argv)
     
     int reuse = 1;
     if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0)
+    {
         perror("setsockopt(SO_REUSEADDR) failed");
+    }
 
     #ifdef SO_REUSEPORT
-    if (setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse)) < 0) 
+    if (setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse)) < 0)
+    {
         perror("setsockopt(SO_REUSEPORT) failed");
+    }
     #endif
     
     struct sockaddr_in addr;
